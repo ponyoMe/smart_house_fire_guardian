@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "105461130049",
+    "project_id": "iot-diploma-notification",
+    "storage_bucket": "iot-diploma-notification.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:105461130049:android:b17d5d1c22dda1afc577c0",
+        "android_client_info": {
+          "package_name": "com.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0gJ7jSC98nUg8X7Bd9BT7hoas7cSQK-g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
