@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useMemo, useState, useEffect } from 'react';
+import React, { createContext, useContext, useMemo, useState, useEffect, useCallback } from 'react';
+import { AppState } from 'react-native';
 //import { INITIAL_DEVICES, INITIAL_EVENTS } from '../data/mockData';
 import {  ActivityEvent, Device, DeviceState } from '../types';
 import { getDevices, sendDeviceCommand } from '../services/api';
@@ -13,42 +14,64 @@ const SmartHouseContext = createContext<SmartHouseContextType | undefined>(undef
 
 export function SmartHouseProvider({ children }: { children: React.ReactNode }) {
   const [devices, setDevices] = useState<Device[]>([]);
+  const refreshDevices = useCallback(async () => {
+    try {
+      const data = await getDevices();
+      setDevices(data);
+    } catch (err) {
+      console.error('Failed to refresh devices', err);
+    }
+  }, []);
 
   useEffect(() => {
-  getDevices()
-    .then(setDevices)
-    .catch(err => console.error('Failed to load devices', err));
-  }, []);
+    void refreshDevices();
+
+    const pollId = setInterval(() => {
+      void refreshDevices();
+    }, 3000);
+
+    const appStateSubscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        void refreshDevices();
+      }
+    });
+
+    return () => {
+      clearInterval(pollId);
+      appStateSubscription.remove();
+    };
+  }, [refreshDevices]);
 
   const [events] = useState<ActivityEvent[]>([]);
 
-  const updateDeviceCommand = async (deviceId: string, command: Partial<DeviceState>) => {
-  try {
-    // Optimistic update (UI first)
-    setDevices(prev =>
-      prev.map(device =>
-        device.id === deviceId
-          ? { ...device, state: { ...device.state, ...command } }
-          : device,
-      ),
-    );
+  const updateDeviceCommand = useCallback(
+    async (deviceId: string, command: Partial<DeviceState>) => {
+      try {
+        // Optimistic update (UI first)
+        setDevices(prev =>
+          prev.map(device =>
+            device.id === deviceId
+              ? { ...device, state: { ...device.state, ...command } }
+              : device,
+          ),
+        );
 
-    // Send to backend
-    const updatedDevice = await sendDeviceCommand(deviceId, command);
+        await sendDeviceCommand(deviceId, command);
 
-    // Sync with backend response
-    setDevices(prev =>
-      prev.map(d => (d.id === deviceId ? updatedDevice : d)),
-    );
-
-  } catch (error) {
-    console.error('Command failed', error);
-  }
-};
+        // Always re-sync from source of truth.
+        await refreshDevices();
+      } catch (error) {
+        console.error('Command failed', error);
+        // Roll forward with backend snapshot even if command flow fails.
+        await refreshDevices();
+      }
+    },
+    [refreshDevices],
+  );
 
   const value = useMemo(
     () => ({ devices, events, updateDeviceCommand }),
-    [devices, events],
+    [devices, events, updateDeviceCommand],
   );
 
   return <SmartHouseContext.Provider value={value}>{children}</SmartHouseContext.Provider>;

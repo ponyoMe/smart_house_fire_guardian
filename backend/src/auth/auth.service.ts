@@ -2,7 +2,6 @@
 
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
@@ -11,15 +10,15 @@ export class AuthService {
   // Simulate user credentials, replace this with a real DB call
   private readonly users = [
     {
-      username: 'client123',
-      password: '$2b$10$QdF5wqR6P6iL6b60I9C6B0CVq9l2Cm7Iuhw3e9b3l7OdVDCJwZTjm', // Hashed password 'securePassword'
+      username: '1234',
+      password: '1234', // Plain password '1234'
     },
   ];
 
   // Validate user credentials
   async validateUser(username: string, password: string): Promise<any> {
     const user = this.users.find(user => user.username === username);
-    if (user && await bcrypt.compare(password, user.password)) {
+    if (user && user.password === password) { // Direct password comparison
       return { username: user.username }; // Return user info for JWT
     }
     return null;

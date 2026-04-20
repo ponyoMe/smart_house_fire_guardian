@@ -1,4 +1,4 @@
-import { Device, DeviceStatus } from '../types';
+import { Device } from '../types';
 
 export const statusMeta = {
   normal: {
@@ -35,13 +35,21 @@ export function getSafetyState(devices: Device[]) {
 export function getDeviceSpecificType(deviceId: string): string {
   if (deviceId.includes('fan')) return 'fan';
   if (deviceId.includes('gas_valve')) return 'gasValve';
+  if (deviceId.includes('water_valve')) return 'waterValve';
+
   if (deviceId.includes('window')) return 'windowServo';
-  if (deviceId.includes('relay')) return 'relay';
+  if (deviceId.includes('door') && deviceId.includes('servo')) return 'doorServo';
+
+  if (deviceId.includes('relay')) return 'powerRelay';
   if (deviceId.includes('pump')) return 'pump';
+  if (deviceId.includes('buzzer')) return 'buzzer';
 
   if (deviceId.includes('mq2')) return 'gasSensor';
-  if (deviceId.includes('flame')) return 'fireSensor';
+  if (deviceId.includes('flame')) return 'flameSensor';
   if (deviceId.includes('leak')) return 'waterLeakSensor';
+  if (deviceId.includes('dht22')) return 'temperatureHumidity';
+  if (deviceId.includes('acs712')) return 'currentSensor';
+  if (deviceId === 'esp32') return 'controller';
 
   return 'unknown';
 }

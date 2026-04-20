@@ -1,0 +1,365 @@
+#include <DHT.h>
+#include <Servo.h>
+
+// ===================== ВАННАЯ =====================
+#define WATER_SENSOR     6
+#define RELAY_WATER      7
+
+// ===================== КУХНЯ =====================
+#define GAS_SENSOR       3
+#define RELAY_GAS        8
+#define RELAY_FAN        9
+#define DHT_KITCHEN_PIN  4
+#define KITCHEN_WINDOW_PIN 26
+
+// ===================== СПАЛЬНЯ =====================
+#define DHT_BEDROOM_PIN  5
+#define BEDROOM_WINDOW_PIN 10
+
+// ===================== ГОСТИНАЯ =====================
+#define FLAME_SENSOR     11
+#define BUZZER           12
+#define RELAY_PUMP       13
+
+// ===================== ТЕХКОМНАТА =====================
+#define POWER_BUTTON     22
+#define RELAY_POWER      2
+#define CURRENT_SENSOR   A0
+#define LIGHT_LIVING     24
+#define LIGHT_BEDROOM    36
+
+// ===================== ДВЕРИ =====================
+#define DOOR1_PIN 28
+#define DOOR2_PIN 30
+#define DOOR3_PIN 32
+#define DOOR4_PIN 34
+#define DOOR5_PIN 38
+
+// ===================== DHT =====================
+#define DHTTYPE DHT22
+DHT kitchenDHT(DHT_KITCHEN_PIN, DHTTYPE);
+DHT bedroomDHT(DHT_BEDROOM_PIN, DHTTYPE);
+
+// ===================== SERVO =====================
+Servo kitchenWindow;
+Servo bedroomWindow;
+Servo door1, door2, door3, door4, door5;
+
+// ===================== ПОРОГИ =====================
+float kitchenTempLimit = 30.0;
+float kitchenHumLimit  = 60.0;
+float bedroomTempLimit = 30.0;
+float bedroomHumLimit  = 70.0;
+
+// ===================== ЛОГИКА =====================
+const int WATER_TRIGGER   = HIGH;
+const int GAS_TRIGGER     = HIGH;
+const int FIRE_TRIGGER    = LOW;
+
+const int WATER_VALVE_ON  = HIGH;
+const int WATER_VALVE_OFF = LOW;
+const int GAS_VALVE_OFF   = HIGH;
+const int GAS_VALVE_ON    = LOW;
+const int FAN_ON          = HIGH;
+const int FAN_OFF         = LOW;
+const int PUMP_ON         = HIGH;
+const int PUMP_OFF        = LOW;
+const int BUZZER_ON       = LOW;
+const int BUZZER_OFF      = HIGH;
+
+const int DOOR_CLOSED  = 0;
+const int DOOR_OPEN    = 90;
+const int WINDOW_CLOSED = 90;
+const int WINDOW_OPEN  = 180;
+
+// ===================== СОСТОЯНИЯ =====================
+bool powerState = true;
+bool lastButtonState = HIGH;
+int  currentThreshold = 650;
+
+unsigned long lastButtonTime = 0;
+const unsigned long debounceDelay = 250;
+
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 600000UL; // 10 min
+
+int lastWaterState        = -1;
+int lastGasState          = -1;
+int lastFlameState        = -1;
+int lastFanState          = -1;
+int lastBedroomWindowState = -1;
+
+// ===================== HELPERS =====================
+void openAllDoors() {
+  door1.write(DOOR_OPEN); door2.write(DOOR_OPEN);
+  door3.write(DOOR_OPEN); door4.write(DOOR_OPEN);
+  door5.write(DOOR_OPEN);
+}
+
+void closeAllDoors() {
+  door1.write(DOOR_CLOSED); door2.write(DOOR_CLOSED);
+  door3.write(DOOR_CLOSED); door4.write(DOOR_CLOSED);
+  door5.write(DOOR_CLOSED);
+}
+
+void openAllWindows() {
+  kitchenWindow.write(WINDOW_OPEN);
+  bedroomWindow.write(WINDOW_OPEN);
+}
+
+void closeAllWindows() {
+  kitchenWindow.write(WINDOW_CLOSED);
+  bedroomWindow.write(WINDOW_CLOSED);
+}
+
+// FIX: fireAlarmSound() now actually called in fire block
+void fireAlarmSound() {
+  for (int i = 0; i < 2; i++) {
+    digitalWrite(BUZZER, BUZZER_ON);  delay(120);
+    digitalWrite(BUZZER, BUZZER_OFF); delay(100);
+  }
+  digitalWrite(BUZZER, BUZZER_ON);  delay(200);
+  digitalWrite(BUZZER, BUZZER_OFF);
+}
+
+// ===================== SEND =====================
+void sendStatus(String deviceId, String status) {
+  String payload =
+    "{\"deviceId\":\"" + deviceId + "\","
+    "\"type\":\"status\","
+    "\"data\":{\"status\":\"" + status + "\"}}";
+  Serial1.println(payload);
+}
+
+void sendTelemetry(float kitchenT, float kitchenH,
+                   float bedroomT, float bedroomH) {
+  if (!isnan(kitchenT) && !isnan(kitchenH)) {
+    String payload =
+      "{\"deviceId\":\"kitchen_dht22\","
+      "\"type\":\"telemetry\","
+      "\"data\":{\"temperature\":" + String(kitchenT, 1) +
+      ",\"humidity\":"             + String(kitchenH, 1) + "}}";
+    Serial1.println(payload);
+  }
+  if (!isnan(bedroomT) && !isnan(bedroomH)) {
+    String payload =
+      "{\"deviceId\":\"bedroom_dht22\","
+      "\"type\":\"telemetry\","
+      "\"data\":{\"temperature\":" + String(bedroomT, 1) +
+      ",\"humidity\":"             + String(bedroomH, 1) + "}}";
+    Serial1.println(payload);
+  }
+}
+
+// ===================== COMMANDS =====================
+// FIX: expects plain string commands (ESP32 now extracts them from JSON)
+void processIncomingCommand(String cmd) {
+  cmd.trim();
+  if (cmd.length() == 0) return;
+
+  Serial.println("CMD from ESP32: " + cmd);
+
+  if      (cmd == "POWER_ON")      { powerState = true;  digitalWrite(RELAY_POWER, LOW);  digitalWrite(LIGHT_LIVING, HIGH); digitalWrite(LIGHT_BEDROOM, HIGH); }
+  else if (cmd == "POWER_OFF")     { powerState = false; digitalWrite(RELAY_POWER, HIGH); digitalWrite(LIGHT_LIVING, LOW);  digitalWrite(LIGHT_BEDROOM, LOW);  }
+  else if (cmd == "OPEN_DOORS")    { openAllDoors();   }
+  else if (cmd == "CLOSE_DOORS")   { closeAllDoors();  }
+  else if (cmd == "OPEN_WINDOWS")  { openAllWindows(); }
+  else if (cmd == "CLOSE_WINDOWS") { closeAllWindows(); }
+  else { Serial.println("Unknown command: " + cmd); }
+}
+
+// ===================== SETUP =====================
+void setup() {
+  Serial.begin(115200);
+  Serial1.begin(115200);
+
+  pinMode(WATER_SENSOR, INPUT);
+  pinMode(GAS_SENSOR,   INPUT);
+  pinMode(FLAME_SENSOR, INPUT);
+  pinMode(RELAY_WATER,  OUTPUT);
+  pinMode(RELAY_GAS,    OUTPUT);
+  pinMode(RELAY_FAN,    OUTPUT);
+  pinMode(RELAY_PUMP,   OUTPUT);
+  pinMode(RELAY_POWER,  OUTPUT);
+  pinMode(BUZZER,       OUTPUT);
+  pinMode(POWER_BUTTON, INPUT_PULLUP);
+  pinMode(LIGHT_LIVING,   OUTPUT);
+  pinMode(LIGHT_BEDROOM,  OUTPUT);
+
+  kitchenDHT.begin();
+  bedroomDHT.begin();
+
+  kitchenWindow.attach(KITCHEN_WINDOW_PIN);
+  bedroomWindow.attach(BEDROOM_WINDOW_PIN);
+  door1.attach(DOOR1_PIN); door2.attach(DOOR2_PIN);
+  door3.attach(DOOR3_PIN); door4.attach(DOOR4_PIN);
+  door5.attach(DOOR5_PIN);
+
+  digitalWrite(RELAY_WATER, WATER_VALVE_OFF);
+  digitalWrite(RELAY_GAS,   GAS_VALVE_ON);
+  digitalWrite(RELAY_FAN,   FAN_OFF);
+  digitalWrite(RELAY_PUMP,  PUMP_OFF);
+  digitalWrite(RELAY_POWER, LOW);
+  digitalWrite(BUZZER,      BUZZER_OFF);
+  digitalWrite(LIGHT_LIVING,  HIGH);
+  digitalWrite(LIGHT_BEDROOM, HIGH);
+
+  closeAllDoors();
+  closeAllWindows();
+
+  sendStatus("tech_power_relay",        "on");
+  sendStatus("bathroom_water_valve",    "closed");
+  sendStatus("kitchen_gas_valve",       "open");
+  sendStatus("kitchen_fan",             "off");
+  sendStatus("living_pump",             "off");
+  sendStatus("bedroom_window_servo",    "closed");
+}
+
+// ===================== LOOP =====================
+void loop() {
+
+  // ---------- commands from ESP32 ----------
+  if (Serial1.available()) {
+    String cmd = Serial1.readStringUntil('\n');
+    processIncomingCommand(cmd);
+  }
+
+  // ---------- power button ----------
+  int buttonState = digitalRead(POWER_BUTTON);
+  if (buttonState == LOW && lastButtonState == HIGH &&
+      millis() - lastButtonTime > debounceDelay) {
+
+    lastButtonTime = millis();
+    powerState = !powerState;
+
+    if (powerState) {
+      digitalWrite(RELAY_POWER, LOW);
+      digitalWrite(LIGHT_LIVING,  HIGH);
+      digitalWrite(LIGHT_BEDROOM, HIGH);
+      sendStatus("tech_power_relay", "on");
+    } else {
+      digitalWrite(RELAY_POWER, HIGH);
+      digitalWrite(LIGHT_LIVING,  LOW);
+      digitalWrite(LIGHT_BEDROOM, LOW);
+      sendStatus("tech_power_relay", "off");
+    }
+  }
+  lastButtonState = buttonState;
+
+  // ---------- overcurrent protection ----------
+  if (analogRead(CURRENT_SENSOR) > currentThreshold && powerState) {
+    powerState = false;
+    digitalWrite(RELAY_POWER, HIGH);
+    digitalWrite(LIGHT_LIVING,  LOW);
+    digitalWrite(LIGHT_BEDROOM, LOW);
+    sendStatus("tech_power_relay", "overload_off");
+  }
+
+  // ---------- read sensors ----------
+  int water  = digitalRead(WATER_SENSOR);
+  int gas    = digitalRead(GAS_SENSOR);
+  int flame  = digitalRead(FLAME_SENSOR);
+
+  float kitchenT = kitchenDHT.readTemperature();
+  float kitchenH = kitchenDHT.readHumidity();
+  float bedroomT = bedroomDHT.readTemperature();
+  float bedroomH = bedroomDHT.readHumidity();
+
+  // ---------- FIRE — check first, highest priority ----------
+  if (flame == FIRE_TRIGGER) {
+    fireAlarmSound();                         // FIX: was never called
+    digitalWrite(RELAY_PUMP, PUMP_ON);
+    digitalWrite(RELAY_GAS,  GAS_VALVE_OFF);  // override gas valve
+    openAllDoors();
+    openAllWindows();
+
+    if (lastFlameState != flame) {
+      sendStatus("living_flame_sensor", "detected");
+      sendStatus("living_pump",         "on");
+      sendStatus("kitchen_gas_valve",   "closed");
+    }
+  } else {
+    digitalWrite(RELAY_PUMP, PUMP_OFF);
+
+    if (lastFlameState != flame) {
+      sendStatus("living_flame_sensor", "normal");
+      sendStatus("living_pump",         "off");
+    }
+  }
+  lastFlameState = flame;
+
+  // ---------- bathroom: water leak ----------
+  if (water == WATER_TRIGGER) {
+    digitalWrite(RELAY_WATER, WATER_VALVE_ON);
+    if (lastWaterState != water) {
+      sendStatus("bathroom_water_leak_sensor", "detected");
+      sendStatus("bathroom_water_valve",       "open");
+    }
+  } else {
+    digitalWrite(RELAY_WATER, WATER_VALVE_OFF);
+    if (lastWaterState != water) {
+      sendStatus("bathroom_water_leak_sensor", "normal");
+      sendStatus("bathroom_water_valve",       "closed");
+    }
+  }
+  lastWaterState = water;
+
+  // ---------- kitchen: gas leak ----------
+  // FIX: skip gas logic if fire is active (fire block already closed valve)
+  if (flame != FIRE_TRIGGER) {
+    if (gas == GAS_TRIGGER) {
+      digitalWrite(RELAY_GAS, GAS_VALVE_OFF);
+      digitalWrite(RELAY_FAN, FAN_ON);        // FIX: force fan on during gas leak
+      kitchenWindow.write(WINDOW_OPEN);
+
+      if (lastGasState != gas) {
+        sendStatus("kitchen_mq2_gas",   "detected");
+        sendStatus("kitchen_gas_valve", "closed");
+        sendStatus("kitchen_fan",       "on");
+      }
+    } else {
+      digitalWrite(RELAY_GAS, GAS_VALVE_ON);
+
+      if (lastGasState != gas) {
+        sendStatus("kitchen_mq2_gas",   "normal");
+        sendStatus("kitchen_gas_valve", "open");
+      }
+    }
+  }
+  lastGasState = gas;
+
+  // ---------- kitchen: fan (temp/humidity, no gas leak, no fire) ----------
+  if (!isnan(kitchenT) && !isnan(kitchenH) &&
+      gas != GAS_TRIGGER && flame != FIRE_TRIGGER) {
+
+    int desiredFan = (kitchenT > kitchenTempLimit || kitchenH > kitchenHumLimit)
+                     ? FAN_ON : FAN_OFF;
+
+    digitalWrite(RELAY_FAN, desiredFan);
+
+    if (lastFanState != desiredFan) {
+      sendStatus("kitchen_fan", desiredFan == FAN_ON ? "on" : "off");
+      lastFanState = desiredFan;
+    }
+  }
+
+  // ---------- bedroom window ----------
+  if (!isnan(bedroomT) && !isnan(bedroomH) && flame != FIRE_TRIGGER) {
+    int desiredWindow = (bedroomT > bedroomTempLimit || bedroomH > bedroomHumLimit)
+                        ? WINDOW_OPEN : WINDOW_CLOSED;
+
+    bedroomWindow.write(desiredWindow);
+
+    if (desiredWindow != lastBedroomWindowState) {
+      sendStatus("bedroom_window_servo",
+                 desiredWindow == WINDOW_OPEN ? "open" : "closed");
+      lastBedroomWindowState = desiredWindow;
+    }
+  }
+
+  // ---------- periodic telemetry (every 10 min) ----------
+  if (millis() - lastSendTime >= sendInterval) {
+    lastSendTime = millis();
+    sendTelemetry(kitchenT, kitchenH, bedroomT, bedroomH);
+  }
+}

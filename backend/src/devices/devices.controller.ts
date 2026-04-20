@@ -60,7 +60,7 @@ export class DevicesController {
       return result;
     } catch (error) {
       if (error instanceof NotFoundException) {
-        throw error; // Re-throw not found exception
+        throw error;
       }
       throw new InternalServerErrorException('Failed to send command');
     }

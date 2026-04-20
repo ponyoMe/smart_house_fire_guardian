@@ -25,7 +25,7 @@ export default function DeviceDetailsScreen({ route }: any) {
           <Text style={styles.title}>{device.name}</Text>
           <Text style={styles.subtitle}>{device.room}</Text>
           <View style={{ marginTop: 10, alignSelf: 'flex-start' }}>
-            <StatusBadge status={device.status} />
+            <StatusBadge status={device.status ?? 'normal'} />
           </View>
         </View>
 
@@ -36,7 +36,7 @@ export default function DeviceDetailsScreen({ route }: any) {
           <InfoRow label="Name" value={device.name} />
         </View>
 
-        { getDeviceSpecificType(device.id) === 'sensor' ? (
+        { device.type === 'sensor' ? (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Telemetry</Text>
             {device.name === 'gasSensor' && (
@@ -103,7 +103,7 @@ export default function DeviceDetailsScreen({ route }: any) {
                 </>
               )}
 
-              {getDeviceSpecificType(device.id) === 'relay' && (
+              {getDeviceSpecificType(device.id) === 'powerRelay' && (
                 <>
                   <TouchableOpacity style={styles.primaryButton} onPress={() => updateDeviceCommand(device.id, { power: 'ON' })}>
                     <Text style={styles.primaryButtonText}>Turn ON</Text>

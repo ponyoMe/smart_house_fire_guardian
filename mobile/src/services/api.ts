@@ -1,6 +1,6 @@
 import { DeviceState } from '../types';
 
-const API_BASE_URL = 'http://192.168.0.193:3000';
+const API_BASE_URL = 'http://192.168.0.8:3000';
 
 export async function getDevices() {
   const response = await fetch(`${API_BASE_URL}/devices`);

@@ -4,10 +4,12 @@ import { DevicesService } from '../devices/devices.service';
 
 type BaseMsg = {
   deviceId: string;
-  type: 'telemetry' | 'status' | 'command';
+  type: 'telemetry' | 'status' | 'command' | 'alert';
   ts: number;
   requestId?: string;
-  data: Record<string, any>;
+  data?: Record<string, any>;
+  event?: string;
+  message?: string;
 };
 
 @Injectable()
@@ -17,60 +19,141 @@ export class MqttService implements OnModuleInit {
   constructor(private readonly devicesService: DevicesService) {}
 
   onModuleInit() {
-    const url = process.env.MQTT_URL ?? 'mqtt://127.0.0.1:1883';
-    this.client = mqtt.connect(url);
+    const url =
+      process.env.MQTT_URL ??
+      'mqtts://a4af6d33f79a4077860f7a5fed91b077.s1.eu.hivemq.cloud:8883';
+
+    const options = {
+      username: 'iot_smart_home',
+      password: 'Password1',
+    };
+
+    this.client = mqtt.connect(url, options);
 
     this.client.on('connect', () => {
       console.log('MQTT Connected');
       this.client.subscribe('home/+/+/telemetry');
       this.client.subscribe('home/+/+/status');
+      this.client.subscribe('home/+/+/alert');
     });
-
-//     this.client.on('connect', () => {
-//   console.log('MQTT Connected to', this.client.options.host, this.client.options.port);
-// });
 
     this.client.on('message', async (topic, message) => {
       const raw = message.toString();
+      let parsed: BaseMsg | null = null;
 
-      //console.log(`RAW topic=${topic}:`, raw);
-let parsed: BaseMsg | null = null;
-//temporary normalization, will be removed once devices send proper JSON
-try {
-  parsed = JSON.parse(raw);
-} catch {
-  try {
-    const normalized = raw
-      .replace(/([{,])\s*([a-zA-Z0-9_]+)\s*:/g, '$1"$2":')
-      .replace(/:\s*([a-zA-Z_][a-zA-Z0-9_-]*)/g, ':"$1"');
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        console.log(`MQTT non-JSON message from ${topic}: ${raw}`);
+        return;
+      }
 
-    parsed = JSON.parse(normalized);
-    console.log('PARSED after normalization', parsed?.type, parsed?.deviceId);
-  } catch {
-    console.log(`MQTT non-JSON message from ${topic}: ${raw}`);
-    return;
-  }
-}
-
-      if (!parsed?.deviceId || !parsed.type || !parsed.ts || !parsed.data) {
+      if (!parsed?.deviceId || !parsed.type || !parsed.ts) {
         console.log(`MQTT invalid payload from ${topic}: ${raw}`);
         return;
       }
 
+      const normalized = this.normalizeIncomingMessage(parsed);
+
       try {
-        if (parsed.type === 'telemetry') {
-          const updated =await this.devicesService.applyTelemetry(parsed as any);
-          console.log(`Telemetry applied: ${updated.id}`);
-        } else if (parsed.type === 'status') {
-          const updated = await this.devicesService.applyStatus(parsed as any);
-          console.log(`Status applied: ${updated.id}`);
-        } else {
-          console.log(`MQTT command received (ignored) topic=${topic}`);
+        if (normalized.type === 'telemetry') {
+  if (normalized.deviceId === 'esp32') {
+    console.log(
+      `ESP32 aggregate telemetry received from ${topic}:`,
+      normalized.data,
+    );
+
+    const updated = await this.devicesService.applyEsp32AggregateTelemetry(
+      normalized.data ?? {},
+      normalized.ts,
+    );
+
+    console.log('ESP32 aggregate telemetry applied successfully:', updated);
+    return;
+  }
+
+  const device = await this.devicesService.getDeviceById(normalized.deviceId);
+  const room = device.room;
+
+  console.log(
+    `Telemetry received for device ${normalized.deviceId} in room ${room}:`,
+    normalized.data,
+  );
+
+  const updated = await this.devicesService.applyTelemetry(
+    normalized as any,
+    room,
+  );
+
+  console.log(
+    `Telemetry applied for device ${normalized.deviceId} in room ${room}:`,
+    updated,
+  );
+
+  return;
+}
+
+        if (normalized.type === 'status') {
+          const device = await this.devicesService.getDeviceById(normalized.deviceId);
+          const room = device.room;
+
+          console.log(
+            `Status received for device ${normalized.deviceId} in room ${room}:`,
+            normalized.data,
+          );
+
+          const updated = await this.devicesService.applyStatus(
+            normalized as any,
+            room,
+          );
+
+          console.log(
+            `Status applied for device ${normalized.deviceId} in room ${room}:`,
+            updated,
+          );
+
+          return;
         }
       } catch (e: any) {
-        console.log(`MQTT handling error topic=${topic}: ${e?.message ?? e}`);
+        console.log(
+          `Error while processing MQTT message for device ${normalized.deviceId}: ${e?.message ?? e}`,
+        );
       }
     });
+  }
+
+  private normalizeIncomingMessage(msg: BaseMsg): BaseMsg {
+    if (msg.type === 'telemetry') {
+      return {
+        ...msg,
+        data: msg.data ?? {},
+      };
+    }
+
+    if (msg.type === 'status' || msg.type === 'alert') {
+      const normalizedData: Record<string, any> = {
+        ...(msg.data ?? {}),
+      };
+
+      if (msg.event && !normalizedData.status) {
+        normalizedData.status = msg.event;
+      }
+
+      if (msg.message && !normalizedData.message) {
+        normalizedData.message = msg.message;
+      }
+
+      return {
+        ...msg,
+        type: 'status',
+        data: normalizedData,
+      };
+    }
+
+    return {
+      ...msg,
+      data: msg.data ?? {},
+    };
   }
 
   publish(topic: string, payload: any) {
