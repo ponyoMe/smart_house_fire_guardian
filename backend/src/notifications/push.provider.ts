@@ -49,13 +49,29 @@ export class FcmPushProvider {
           body: payload.body,
         },
         data: payload.data,
+        android: {
+          priority: 'high' as const,
+          notification: {
+            channelId: 'alerts',
+            sound: 'default',
+            defaultSound: true,
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+            },
+          },
+        },
       };
 
       // Send the push notification via Firebase Cloud Messaging
       await admin.messaging().send(message);
       this.logger.log(`Notification sent to token=${payload.token}`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to send FCM push notification', error);
+      throw error;
     }
   }
 }

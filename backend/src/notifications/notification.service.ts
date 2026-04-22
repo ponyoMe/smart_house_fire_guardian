@@ -6,6 +6,8 @@ import { UserPushTokenEntity } from './entities/user-push-token.entity';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { RegisterPushTokenDto } from './dto/register-push-token.dto';
 import {
+  NotificationSeverity,
+  NotificationType,
   NotificationStatus,
 } from './notification.enum';
 import { FcmPushProvider } from './push.provider';
@@ -81,15 +83,28 @@ export class NotificationService {
       });
 
       for (const tokenRow of activeTokens) {
-        await this.pushProvider.send({
-          token: tokenRow.token,
-          title: dto.title,
-          body: dto.body,
-          data: {
-            notificationId: notification.id,
-            ...dto.data,
-          },
-        });
+        try {
+          await this.pushProvider.send({
+            token: tokenRow.token,
+            title: dto.title,
+            body: dto.body,
+            data: {
+              notificationId: notification.id,
+              type: dto.type,
+              severity: dto.severity,
+              ...dto.data,
+            },
+          });
+        } catch (sendError: any) {
+          const errorCode = sendError?.errorInfo?.code ?? sendError?.code;
+          const tokenNotRegistered =
+            errorCode === 'messaging/registration-token-not-registered' ||
+            errorCode === 'messaging/invalid-registration-token';
+
+          if (tokenNotRegistered) {
+            await this.deactivatePushToken(tokenRow.token);
+          }
+        }
       }
 
       notification.status = NotificationStatus.SENT;
@@ -148,5 +163,111 @@ export class NotificationService {
       .where('user_id = :userId', { userId })
       .andWhere('read_at IS NULL')
       .execute();
+  }
+
+  async getActiveUserIds(): Promise<string[]> {
+    const rows = await this.pushTokenRepo
+      .createQueryBuilder('token')
+      .select('DISTINCT token.user_id', 'userId')
+      .where('token.is_active = :isActive', { isActive: true })
+      .getRawMany<{ userId: string }>();
+
+    return rows.map((row) => String(row.userId));
+  }
+
+  async notifyDeviceAlertForAllUsers(params: {
+    deviceId: string;
+    room: string;
+    title: string;
+    body: string;
+    event: string;
+    severity?: NotificationSeverity;
+  }): Promise<void> {
+    const userIds = await this.getActiveUserIds();
+    if (!userIds.length) return;
+
+    await Promise.all(
+      userIds.map((userId) =>
+        this.createAndSend({
+          userId,
+          type: NotificationType.ALERT,
+          severity: params.severity ?? NotificationSeverity.HIGH,
+          title: params.title,
+          body: params.body,
+          data: {
+            category: 'device',
+            deviceId: params.deviceId,
+            room: params.room,
+            event: params.event,
+          },
+        }),
+      ),
+    );
+  }
+
+  async notifyDeviceInfoForAllUsers(params: {
+    deviceId: string;
+    room: string;
+    title: string;
+    body: string;
+    event: string;
+  }): Promise<void> {
+    const userIds = await this.getActiveUserIds();
+    if (!userIds.length) return;
+
+    await Promise.all(
+      userIds.map((userId) =>
+        this.createAndSend({
+          userId,
+          type: NotificationType.DEVICE,
+          severity: NotificationSeverity.LOW,
+          title: params.title,
+          body: params.body,
+          data: {
+            category: 'device',
+            deviceId: params.deviceId,
+            room: params.room,
+            event: params.event,
+          },
+        }),
+      ),
+    );
+  }
+
+  async sendDailySummaryForAllUsers(): Promise<void> {
+    const userIds = await this.getActiveUserIds();
+    if (!userIds.length) return;
+
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    await Promise.all(
+      userIds.map(async (userId) => {
+        const alertsLastDay = await this.notificationRepo
+          .createQueryBuilder('notification')
+          .where('notification.user_id = :userId', { userId })
+          .andWhere('notification.type = :type', { type: NotificationType.ALERT })
+          .andWhere('notification.created_at >= :since', { since })
+          .getCount();
+
+        const body =
+          alertsLastDay === 0
+            ? 'Last 24 hours: no critical alerts were detected. Your smart home is stable.'
+            : `Last 24 hours: ${alertsLastDay} alert(s) were detected. Please review Activity for details.`;
+
+        return this.createAndSend({
+          userId,
+          type: NotificationType.SYSTEM,
+          severity: NotificationSeverity.LOW,
+          title: 'Daily safety report',
+          body,
+          data: {
+            category: 'system',
+            windowHours: 24,
+            since: since.toISOString(),
+            alertsLastDay,
+          },
+        });
+      }),
+    );
   }
 }

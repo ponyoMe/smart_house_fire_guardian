@@ -4,6 +4,8 @@ import { useNavigation } from '@react-navigation/native';  // Using useNavigatio
 import axios from 'axios'; // For making HTTP requests
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Ionicons'; // Importing the icon library
+import { setAuthToken } from '../services/api';
+import { useSmartHouse } from '../context/SmartHouseContext';
 
 type LoginNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -15,6 +17,7 @@ export type RootStackParamList = {
 
 const LoginScreen: React.FC = () => {
   const navigation = useNavigation<LoginNavigationProp>();
+  const { initializeNotifications } = useSmartHouse();
   const [houseNumber, setHouseNumber] = useState('');
   const [password, setPassword] = useState('');
   const [isPasswordVisible, setIsPasswordVisible] = useState(false); // State for password visibility
@@ -26,13 +29,15 @@ const LoginScreen: React.FC = () => {
     }
 
     try {
-      const response = await axios.post('http://192.168.0.8:3000/auth/login', {
+      const response = await axios.post('http://192.168.0.6:3000/auth/login', {
         username: houseNumber,
         password,
       });
 
       const { access_token } = response.data;
       console.log('JWT Token:', access_token);
+      setAuthToken(access_token);
+      await initializeNotifications();
 
       navigation.reset({
         index: 0,

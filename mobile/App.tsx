@@ -1,10 +1,9 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { StatusBar } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import RootNavigator from './src/navigation/RootNavigator';
 import { SmartHouseProvider } from './src/context/SmartHouseContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import messaging from '@react-native-firebase/messaging';
 
 const navTheme = {
   ...DefaultTheme,
@@ -17,22 +16,6 @@ const navTheme = {
 
 
 export default function App() {
-  useEffect(() => {
-  async function init() {
-    await messaging().requestPermission();
-
-    const token = await messaging().getToken();
-    console.log('FCM TOKEN:', token);
-  }
-
-  init();
-
-  const unsubscribe = messaging().onMessage(async remoteMessage => {
-    console.log('Notification received:', remoteMessage);
-  });
-
-  return unsubscribe; // cleanup
-}, []);
   return (
     <SafeAreaProvider>
     <SmartHouseProvider>

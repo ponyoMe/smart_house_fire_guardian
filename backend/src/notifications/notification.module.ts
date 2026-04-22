@@ -14,10 +14,7 @@ import { FcmPushProvider } from './push.provider';
   controllers: [NotificationController],
   providers: [
     NotificationService,
-    {
-      provide: 'FcmPushProvider',
-      useClass: FcmPushProvider
-    },
+    FcmPushProvider,
   ],
   exports: [NotificationService],
 })

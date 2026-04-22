@@ -9,8 +9,8 @@ import { ConfigModule } from '@nestjs/config';
 import { MqttService } from './mqtt/mqtt.service';
 import { DevicesModule } from './devices/devices.module';
 import { TypeOrmModule } from '@nestjs/typeorm/dist/typeorm.module';
-import * as dotenv from 'dotenv';
-dotenv.config(); // This loads the environment variables from .env file
+import { NotificationModule } from './notifications/notification.module';
+import * as dotenv from 'dotenv'; 
 @Module({
   imports: [TypeOrmModule.forRoot({
     type: 'postgres',
@@ -21,7 +21,7 @@ dotenv.config(); // This loads the environment variables from .env file
     database: process.env.DB_NAME,
     autoLoadEntities: true,
     synchronize: true//in prod set to false and use migrations
-  }), ConfigModule.forRoot({ isGlobal: true }), AuthModule, MqttModule, DevicesModule],
+  }), ConfigModule.forRoot({ isGlobal: true }), AuthModule, MqttModule, DevicesModule, NotificationModule],
   controllers: [AppController, DevicesController],
   providers: [AppService],
 })

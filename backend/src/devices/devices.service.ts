@@ -24,6 +24,7 @@ type StatusMsg = {
 const ACTUATOR_STATE_KEYS = new Set([
   'power', 'position', 'valve', 'fan', 'pump', 'light', 'lock',
 ]);
+const STALE_DETECTED_TIMEOUT_MS = 120_000;
 
 @Injectable()
 export class DevicesService {
@@ -42,10 +43,15 @@ export class DevicesService {
     const states = await this.stateRepo.find();
     const stateMap = new Map(states.map((s) => [s.deviceId, s]));
 
-    return devices.map((device) => {
-      const currentState = stateMap.get(device.id);
-      return this.formatDevice(device, currentState);
-    });
+    const formattedDevices = await Promise.all(
+      devices.map(async (device) => {
+        const currentState = stateMap.get(device.id);
+        const normalizedState = await this.normalizeStaleDetectedState(device, currentState);
+        return this.formatDevice(device, normalizedState);
+      }),
+    );
+
+    return formattedDevices;
   }
 
   async getDeviceById(deviceId: string) {
@@ -53,7 +59,47 @@ export class DevicesService {
     if (!device) throw new NotFoundException(`Device not found: ${deviceId}`);
 
     const currentState = await this.stateRepo.findOne({ where: { deviceId } });
-    return this.formatDevice(device, currentState ?? undefined);
+    const normalizedState = await this.normalizeStaleDetectedState(device, currentState ?? undefined);
+    return this.formatDevice(device, normalizedState ?? undefined);
+  }
+
+  private hasDangerSignal(data?: Record<string, any> | null): boolean {
+    if (!data) return false;
+    return (
+      data.gasDetected === true ||
+      data.gas === 1 ||
+      data.leak === true ||
+      data.waterLeak === true ||
+      data.water === 1 ||
+      data.fireDetected === true ||
+      data.flame === 1
+    );
+  }
+
+  private async normalizeStaleDetectedState(
+    device: DeviceEntity,
+    currentState?: DeviceStateEntity,
+  ): Promise<DeviceStateEntity | undefined> {
+    if (!currentState) return currentState;
+    if (device.type !== 'sensor') return currentState;
+    if (currentState.status !== DeviceStatus.DETECTED) return currentState;
+    if (!currentState.lastSeen) return currentState;
+
+    const ageMs = Date.now() - new Date(currentState.lastSeen).getTime();
+    if (ageMs < STALE_DETECTED_TIMEOUT_MS) return currentState;
+    if (this.hasDangerSignal(currentState.lastTelemetry)) return currentState;
+
+    const normalized = this.stateRepo.create({
+      ...currentState,
+      status: DeviceStatus.NORMAL,
+      state: {
+        ...(currentState.state ?? {}),
+        status: 'AUTO_NORMALIZED',
+        message: 'Automatically normalized after stale detected state timeout',
+      },
+    });
+    await this.stateRepo.save(normalized);
+    return normalized;
   }
 
   private formatDevice(device: DeviceEntity, currentState?: DeviceStateEntity) {
@@ -217,13 +263,26 @@ export class DevicesService {
     if (!device) throw new NotFoundException(`Device not found: ${msg.deviceId}`);
 
     const existingState = await this.stateRepo.findOne({ where: { deviceId: msg.deviceId } });
+    const actuatorDelta = this.extractActuatorState(msg.data);
+    const statusText =
+      typeof msg.data?.status === 'string' ? msg.data.status.toUpperCase() : undefined;
+    const mergedState = {
+      ...(existingState?.state ?? {}),
+      ...actuatorDelta,
+      ...(msg.data?.message ? { message: msg.data.message } : {}),
+      ...(statusText ? { status: statusText } : {}),
+    };
+    const statusToSave =
+      device.type === 'actuator'
+        ? this.getStatusFromEventOrData(msg.data, existingState?.status)
+        : this.getTelemetryStatus(msg.data);
 
     const stateToSave = this.stateRepo.create({
       deviceId: msg.deviceId,
-      status: this.getTelemetryStatus(msg.data),
+      status: statusToSave,
       lastSeen: this.getMessageDate(msg.ts),
       lastTelemetry: msg.data,
-      state: existingState?.state ?? {},
+      state: mergedState,
     });
 
     await this.stateRepo.save(stateToSave);
@@ -259,11 +318,6 @@ export class DevicesService {
   });
 
   await this.stateRepo.save(stateToSave);
-
-  // special case: esp32 heartbeat/status should also fan out its stored telemetry
-  if (msg.deviceId === 'esp32' && existingState?.lastTelemetry) {
-    await this.applyEsp32AggregateTelemetry(existingState.lastTelemetry, msg.ts);
-  }
 
   return this.getDeviceById(msg.deviceId);
 }
