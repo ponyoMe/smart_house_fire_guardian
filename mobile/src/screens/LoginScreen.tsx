@@ -29,7 +29,7 @@ const LoginScreen: React.FC = () => {
     }
 
     try {
-      const response = await axios.post('http://192.168.0.7:3000/auth/login', {
+      const response = await axios.post('https://smart-house-fire-guardian.onrender.com/auth/login', {
         username: houseNumber,
         password,
       });

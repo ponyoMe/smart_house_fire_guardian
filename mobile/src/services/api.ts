@@ -1,6 +1,7 @@
 import { DeviceState } from '../types';
 
-const API_BASE_URL = 'http://192.168.0.7:3000';
+const API_BASE_URL = "https://smart-house-fire-guardian.onrender.com"
+//'http://192.168.0.7:3000';
 let authToken: string | null = null;
 
 function buildAuthHeaders() {
