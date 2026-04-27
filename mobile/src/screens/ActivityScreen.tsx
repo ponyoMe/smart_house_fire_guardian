@@ -1,15 +1,17 @@
-import React, { useMemo, useState } from 'react';
-import { FlatList, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { FlatList, RefreshControl, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import ActivityCard from '../components/activity/ActivityCard';
 import { useSmartHouse } from '../context/SmartHouseContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 type ActivityFilter = 'All' | 'Alerts' | 'System' | 'Devices';
 
 export default function ActivityScreen() {
   const [filter, setFilter] = useState<ActivityFilter>('All');
-  const { events } = useSmartHouse();
+  const [refreshing, setRefreshing] = useState(false);
+  const { events, refreshNotifications } = useSmartHouse();
 
   const filteredEvents = useMemo(() => {
     if (filter === 'All') return events;
@@ -17,6 +19,23 @@ export default function ActivityScreen() {
     if (filter === 'System') return events.filter(e => e.type === 'system');
     return events.filter(e => e.type === 'device');
   }, [events, filter]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshNotifications();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshNotifications]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshNotifications().catch(error => {
+        console.error('Failed to refresh notifications on Activity focus', error);
+      });
+    }, [refreshNotifications]),
+  );
 
   const insets = useSafeAreaInsets();
   return (
@@ -46,6 +65,7 @@ export default function ActivityScreen() {
         renderItem={({ item }) => <ActivityCard event={item} />}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       />
     </SafeAreaView>
   );

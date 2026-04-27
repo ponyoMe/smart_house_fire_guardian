@@ -17,6 +17,8 @@ type SmartHouseContextType = {
   events: ActivityEvent[];
   updateDeviceCommand: (deviceId: string, command: Partial<DeviceState>) => Promise<void>;
   initializeNotifications: () => Promise<void>;
+  refreshAppData: () => Promise<void>;
+  refreshNotifications: () => Promise<void>;
 };
 
 const SmartHouseContext = createContext<SmartHouseContextType | undefined>(undefined);
@@ -25,14 +27,31 @@ export function SmartHouseProvider({ children }: { children: React.ReactNode }) 
   const [devices, setDevices] = useState<Device[]>([]);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [pushRegistered, setPushRegistered] = useState(false);
+  const normalizeStatus = useCallback((status: Device['status'] | string | null | undefined): Device['status'] => {
+    if (!status) return null;
+    const normalized = String(status).trim().toLowerCase();
+    if (normalized === 'detected') return 'detected';
+    if (normalized === 'normal') return 'normal';
+    return null;
+  }, []);
+
+  const normalizeDevices = useCallback(
+    (list: Device[]): Device[] =>
+      list.map(device => ({
+        ...device,
+        status: normalizeStatus(device.status),
+      })),
+    [normalizeStatus],
+  );
+
   const refreshDevices = useCallback(async () => {
     try {
       const data = await getDevices();
-      setDevices(data);
+      setDevices(normalizeDevices(data));
     } catch (err) {
       console.error('Failed to refresh devices', err);
     }
-  }, []);
+  }, [normalizeDevices]);
 
   useEffect(() => {
     refreshDevices().catch(err => {
@@ -92,6 +111,10 @@ export function SmartHouseProvider({ children }: { children: React.ReactNode }) 
       console.error('Failed to refresh notifications', error);
     }
   }, [mapNotificationToActivityEvent]);
+
+  const refreshAppData = useCallback(async () => {
+    await Promise.all([refreshDevices(), refreshEvents()]);
+  }, [refreshDevices, refreshEvents]);
 
   const initializeNotifications = useCallback(async () => {
     if (!getAuthToken()) {
@@ -191,8 +214,15 @@ export function SmartHouseProvider({ children }: { children: React.ReactNode }) 
   );
 
   const value = useMemo(
-    () => ({ devices, events, updateDeviceCommand, initializeNotifications }),
-    [devices, events, updateDeviceCommand, initializeNotifications],
+    () => ({
+      devices,
+      events,
+      updateDeviceCommand,
+      initializeNotifications,
+      refreshAppData,
+      refreshNotifications: refreshEvents,
+    }),
+    [devices, events, updateDeviceCommand, initializeNotifications, refreshAppData, refreshEvents],
   );
 
   return <SmartHouseContext.Provider value={value}>{children}</SmartHouseContext.Provider>;

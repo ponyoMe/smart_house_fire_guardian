@@ -10,15 +10,14 @@ async function bootstrap() {
 
   app.useGlobalFilters(new HttpExceptionFilter());
   const options = new DocumentBuilder()
-    .setTitle('API IOT Fire Guardian') // API title
+    .setTitle('API IOT Fire Guardian') 
     .setDescription('API documentation for our diploma project Fire Guardian Smart House')
-    .setVersion('1.0') // API version
-    .addTag('users') // optional: add a tag for grouping (e.g., "users")
+    .setVersion('1.0') 
+    .addTag('users')
     .build();
 
   const document = SwaggerModule.createDocument(app, options);
 
-  // swagger UI endpoint /api-docs
   SwaggerModule.setup('api-docs', app, document);
 
   await app.listen(process.env.PORT ?? 3000);

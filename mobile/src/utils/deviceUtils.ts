@@ -26,7 +26,26 @@ export function formatLastSeen(date?: string | null): string {
 }
 
 export function getSafetyState(devices: Device[]) {
-  if (devices.some(d => d.status === 'detected')) return { label: 'Critical', color: '#EF4444' };
+  const hasKnownStatus = devices.some((device) => {
+    if (!device.status) return false;
+    const normalized = String(device.status).trim().toLowerCase();
+    return normalized === 'normal' || normalized === 'detected';
+  });
+
+  const hasDetectedStatus = devices.some((device) => {
+    if (!device.status) return false;
+    return String(device.status).trim().toLowerCase() === 'detected';
+  });
+
+  const hasDangerTelemetry = devices.some((device) => {
+    const telemetry = device.lastTelemetry;
+    if (!telemetry) return false;
+    return telemetry.gas === 1 || telemetry.flame === 1 || telemetry.water === 1;
+  });
+
+  if (hasDetectedStatus) return { label: 'Critical', color: '#EF4444' };
+  if (hasKnownStatus) return { label: 'Safe', color: '#22C55E' };
+  if (hasDangerTelemetry) return { label: 'Critical', color: '#EF4444' };
   // if (devices.some(d => d.status === 'WARNING')) return { label: 'Attention Needed', color: '#F59E0B' };
   // if (devices.some(d => d.status === 'OFFLINE')) return { label: 'Partial Connectivity', color: '#9CA3AF' };
   return { label: 'Safe', color: '#22C55E' };

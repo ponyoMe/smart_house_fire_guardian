@@ -204,6 +204,11 @@ export class DevicesService {
     ]);
 
     const normalEvents = new Set([
+      'NORMAL',
+      'OK',
+      'SAFE',
+      'CLEAR',
+      'RESOLVED',
       'HEARTBEAT',
       'ONLINE',
       'POWER_ON',
@@ -215,7 +220,10 @@ export class DevicesService {
       'OFF',
       'FIRE_CLEAR',
       'GAS_OK',
+      'GAS_CLEAR',
       'WATER_OK',
+      'WATER_CLEAR',
+      'NO_ALERT',
       'PUMP_ON',
       'PUMP_OFF',
       'BUZZER_ON',
@@ -272,10 +280,13 @@ export class DevicesService {
       ...(msg.data?.message ? { message: msg.data.message } : {}),
       ...(statusText ? { status: statusText } : {}),
     };
+    const hasExplicitStatus = typeof msg.data?.status === 'string' && msg.data.status.trim().length > 0;
     const statusToSave =
-      device.type === 'actuator'
+      hasExplicitStatus
         ? this.getStatusFromEventOrData(msg.data, existingState?.status)
-        : this.getTelemetryStatus(msg.data);
+        : device.type === 'actuator'
+          ? this.getStatusFromEventOrData(msg.data, existingState?.status)
+          : this.getTelemetryStatus(msg.data);
 
     const stateToSave = this.stateRepo.create({
       deviceId: msg.deviceId,

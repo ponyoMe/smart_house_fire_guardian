@@ -13,14 +13,13 @@ import { NotificationModule } from './notifications/notification.module';
 import * as dotenv from 'dotenv'; 
 @Module({
   imports: [TypeOrmModule.forRoot({
-    type: 'postgres',
-    host: process.env.DB_HOST || 'localhost',
-    port: 5432,
-    username: process.env.DB_USERNAME,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    autoLoadEntities: true,
-    synchronize: true//in prod set to false and use migrations
+     type: 'postgres',
+     url: process.env.DB_URL,
+     autoLoadEntities: true,
+     synchronize: true,
+     ssl: {
+       rejectUnauthorized: false,
+    },
   }), ConfigModule.forRoot({ isGlobal: true }), AuthModule, MqttModule, DevicesModule, NotificationModule],
   controllers: [AppController, DevicesController],
   providers: [AppService],

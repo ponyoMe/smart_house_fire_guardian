@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { RefreshControl, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
 import DeviceCard from '../components/device/DeviceCard';
 import HeaderBar from '../components/common/HeaderBar';
@@ -11,7 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function HomeScreen({ navigation }: any) {
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
-  const { devices, updateDeviceCommand } = useSmartHouse();
+  const [refreshing, setRefreshing] = useState(false);
+  const { devices, updateDeviceCommand, refreshAppData } = useSmartHouse();
 
   useEffect(() => {
     if (devices.length && !selectedRoom) {
@@ -29,6 +30,37 @@ export default function HomeScreen({ navigation }: any) {
     () => devices.filter(d => d.room.toLowerCase() === selectedRoom?.toLowerCase()),
     [devices, selectedRoom]
   );
+
+  const getRoomMetric = (room: string, metric: 'temperature' | 'humidity') => {
+    const roomKeyPrefix = room.toLowerCase();
+    const aggregateKey =
+      metric === 'temperature'
+        ? (`${roomKeyPrefix}Temp` as 'kitchenTemp' | 'bedroomTemp')
+        : (`${roomKeyPrefix}Hum` as 'kitchenHum' | 'bedroomHum');
+
+    // Prefer aggregate room values first; they represent the latest ESP32 snapshot.
+    for (const device of devices) {
+      const telemetry = device.lastTelemetry;
+      if (!telemetry) continue;
+      const aggregateValue = telemetry[aggregateKey];
+      if (typeof aggregateValue === 'number') {
+        return aggregateValue;
+      }
+    }
+
+    // Fallback to room-specific direct telemetry values.
+    for (const device of roomDevices) {
+      const telemetry = device.lastTelemetry;
+      if (!telemetry) continue;
+
+      const directValue = telemetry[metric];
+      if (typeof directValue === 'number') {
+        return directValue;
+      }
+    }
+
+    return undefined;
+  };
 
   const getPowerValue = (device: any) =>
     device?.state?.power ?? device?.state?.status ?? 'N/A';
@@ -53,7 +85,6 @@ export default function HomeScreen({ navigation }: any) {
   const roomSummaryCards = useMemo(() => {
     if (!selectedRoom) return [];
 
-    const dht22 = roomDevices.find(d => getDeviceSpecificType(d.id) === 'temperatureHumidity');
     const gasSensor = roomDevices.find(d => getDeviceSpecificType(d.id) === 'gasSensor');
     const fan = roomDevices.find(d => getDeviceSpecificType(d.id) === 'fan');
     const gasValve = roomDevices.find(d => getDeviceSpecificType(d.id) === 'gasValve');
@@ -72,17 +103,19 @@ export default function HomeScreen({ navigation }: any) {
     const room = selectedRoom.toLowerCase();
 
     if (room === 'kitchen') {
+      const roomTemperature = getRoomMetric('kitchen', 'temperature');
+      const roomHumidity = getRoomMetric('kitchen', 'humidity');
       return [
         {
           label: 'Temperature',
-          value: dht22?.lastTelemetry?.temperature !== undefined
-            ? `${dht22.lastTelemetry.temperature}°C`
+          value: roomTemperature !== undefined
+            ? `${roomTemperature}°C`
             : '-',
         },
         {
           label: 'Humidity',
-          value: dht22?.lastTelemetry?.humidity !== undefined
-            ? `${dht22.lastTelemetry.humidity}%`
+          value: roomHumidity !== undefined
+            ? `${roomHumidity}%`
             : '-',
         },
         {
@@ -101,17 +134,19 @@ export default function HomeScreen({ navigation }: any) {
     }
 
     if (room === 'bedroom') {
+      const roomTemperature = getRoomMetric('bedroom', 'temperature');
+      const roomHumidity = getRoomMetric('bedroom', 'humidity');
       return [
         {
           label: 'Temperature',
-          value: dht22?.lastTelemetry?.temperature !== undefined
-            ? `${dht22.lastTelemetry.temperature}°C`
+          value: roomTemperature !== undefined
+            ? `${roomTemperature}°C`
             : '-',
         },
         {
           label: 'Humidity',
-          value: dht22?.lastTelemetry?.humidity !== undefined
-            ? `${dht22.lastTelemetry.humidity}%`
+          value: roomHumidity !== undefined
+            ? `${roomHumidity}%`
             : '-',
         },
         {
@@ -177,10 +212,21 @@ export default function HomeScreen({ navigation }: any) {
 
   const safety = getSafetyState(devices);
   const insets = useSafeAreaInsets();
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refreshAppData();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshAppData]);
 
   return (
     <SafeAreaView style={[styles.safeArea, { paddingTop: insets.top }]}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <HeaderBar title="Smart House" />
 
         <View style={[styles.safetyBanner, { borderLeftColor: safety.color }]}>
